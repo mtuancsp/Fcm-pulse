@@ -9,6 +9,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
+import android.text.InputFilter;
 import android.text.InputType;
 import android.view.View;
 import android.view.ViewGroup;
@@ -27,7 +28,9 @@ import java.util.Date;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
-    private static final int[] INTERVALS = {5, 10, 15, 20, 30, 45, 60};
+    private static final int MIN_INTERVAL = 1;
+    private static final int MAX_INTERVAL = 1440;
+    private static final int QUIET_STEP_MIN = 30;
     private static final String[] MODES = {
             "Tiết kiệm (không biểu tượng, có thể trễ khi Doze)",
             "Chính xác (alarm đồng hồ, hiện biểu tượng báo thức)"
@@ -35,7 +38,7 @@ public class MainActivity extends Activity {
 
     private Switch swEnabled;
     private Switch swQuiet;
-    private Spinner spInterval;
+    private EditText etInterval;
     private Spinner spMode;
     private Spinner spQuietStart;
     private Spinner spQuietEnd;
@@ -96,11 +99,18 @@ public class MainActivity extends Activity {
         swEnabled.setPadding(0, dp(14), 0, dp(6));
         root.addView(swEnabled);
 
-        root.addView(label("Chu kỳ (phút)"));
-        String[] iv = new String[INTERVALS.length];
-        for (int i = 0; i < INTERVALS.length; i++) iv[i] = INTERVALS[i] + " phút";
-        spInterval = spinner(iv);
-        root.addView(spInterval);
+        root.addView(label("Chu kỳ (phút, từ " + MIN_INTERVAL + " đến " + MAX_INTERVAL + ")"));
+        etInterval = new EditText(this);
+        etInterval.setInputType(InputType.TYPE_CLASS_NUMBER);
+        etInterval.setFilters(new InputFilter[]{new InputFilter.LengthFilter(4)});
+        etInterval.setHint("15");
+        root.addView(etInterval);
+
+        TextView ivHint = new TextView(this);
+        ivHint.setText("Chu kỳ ngắn tốn pin hơn. Với kiểu Tiết kiệm, Android thường giới hạn "
+                + "khoảng 9 phút một lần khi máy ở Doze.");
+        ivHint.setTextSize(12);
+        root.addView(ivHint);
 
         root.addView(label("Kiểu alarm"));
         spMode = spinner(MODES);
@@ -111,10 +121,25 @@ public class MainActivity extends Activity {
         swQuiet.setPadding(0, dp(14), 0, dp(4));
         root.addView(swQuiet);
 
-        String[] hours = new String[24];
-        for (int h = 0; h < 24; h++) hours[h] = String.format(Locale.US, "%02d:00", h);
-        spQuietStart = spinner(hours);
-        spQuietEnd = spinner(hours);
+        LinearLayout captions = new LinearLayout(this);
+        captions.setOrientation(LinearLayout.HORIZONTAL);
+        TextView fromCap = new TextView(this);
+        fromCap.setText("Từ");
+        fromCap.setTextSize(12);
+        TextView toCap = new TextView(this);
+        toCap.setText("Đến");
+        toCap.setTextSize(12);
+        LinearLayout.LayoutParams capHalf =
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        captions.addView(fromCap, capHalf);
+        captions.addView(toCap, capHalf);
+        root.addView(captions);
+
+        int slots = 24 * 60 / QUIET_STEP_MIN;
+        String[] times = new String[slots];
+        for (int i = 0; i < slots; i++) times[i] = fmtMin(i * QUIET_STEP_MIN);
+        spQuietStart = spinner(times);
+        spQuietEnd = spinner(times);
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout.LayoutParams half =
@@ -134,8 +159,9 @@ public class MainActivity extends Activity {
         root.addView(etActions);
 
         root.addView(button("Lưu và áp dụng", v -> {
-            applyConfig(swEnabled.isChecked());
-            Toast.makeText(this, "Đã lưu", Toast.LENGTH_SHORT).show();
+            if (applyConfig(swEnabled.isChecked())) {
+                Toast.makeText(this, "Đã lưu", Toast.LENGTH_SHORT).show();
+            }
         }));
 
         root.addView(label("Công cụ"));
@@ -185,43 +211,62 @@ public class MainActivity extends Activity {
     private void loadFromPrefs() {
         loading = true;
         swEnabled.setChecked(Prefs.enabled(this));
-        int cur = Prefs.intervalMin(this);
-        int pos = 2;
-        for (int i = 0; i < INTERVALS.length; i++) {
-            if (INTERVALS[i] == cur) pos = i;
-        }
-        spInterval.setSelection(pos);
+        etInterval.setText(String.valueOf(Prefs.intervalMin(this)));
         spMode.setSelection(Prefs.mode(this) == 1 ? 1 : 0);
         swQuiet.setChecked(Prefs.quietEnabled(this));
-        spQuietStart.setSelection(Prefs.quietStart(this));
-        spQuietEnd.setSelection(Prefs.quietEnd(this));
+        int maxSlot = 24 * 60 / QUIET_STEP_MIN - 1;
+        spQuietStart.setSelection(Math.min(maxSlot, Prefs.quietStartMin(this) / QUIET_STEP_MIN));
+        spQuietEnd.setSelection(Math.min(maxSlot, Prefs.quietEndMin(this) / QUIET_STEP_MIN));
         etActions.setText(Prefs.actionsRaw(this));
         loading = false;
 
         swEnabled.setOnCheckedChangeListener((b, checked) -> {
-            if (!loading) applyConfig(checked);
+            if (loading) return;
+            if (!applyConfig(checked)) {
+                loading = true;
+                swEnabled.setChecked(!checked);
+                loading = false;
+            }
         });
     }
 
     // ---- hành động -----------------------------------------------------
 
-    private void applyConfig(boolean enabled) {
+    /** Trả về -1 nếu ô chu kỳ trống hoặc ngoài khoảng cho phép. */
+    private int readInterval() {
+        try {
+            int v = Integer.parseInt(etInterval.getText().toString().trim());
+            return (v >= MIN_INTERVAL && v <= MAX_INTERVAL) ? v : -1;
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    /** Lưu cấu hình và đặt hoặc huỷ alarm. Trả về false nếu dữ liệu nhập không hợp lệ. */
+    private boolean applyConfig(boolean enabled) {
+        int interval = readInterval();
+        if (interval < 0) {
+            Toast.makeText(this, "Chu kỳ phải là số từ " + MIN_INTERVAL + " đến " + MAX_INTERVAL
+                    + " phút", Toast.LENGTH_LONG).show();
+            return false;
+        }
         Prefs.saveConfig(this,
                 enabled,
-                INTERVALS[spInterval.getSelectedItemPosition()],
+                interval,
                 spMode.getSelectedItemPosition(),
                 swQuiet.isChecked(),
-                spQuietStart.getSelectedItemPosition(),
-                spQuietEnd.getSelectedItemPosition(),
+                spQuietStart.getSelectedItemPosition() * QUIET_STEP_MIN,
+                spQuietEnd.getSelectedItemPosition() * QUIET_STEP_MIN,
                 etActions.getText().toString());
         if (enabled) {
             Scheduler.schedule(this);
-            Prefs.log(this, "bật, chu kỳ " + Prefs.intervalMin(this) + " phút");
+            Prefs.log(this, "bật, chu kỳ " + interval + " phút");
         } else {
             Scheduler.cancel(this);
             Prefs.log(this, "tắt");
         }
         refresh();
+        return true;
     }
 
     private void requestIgnoreBattery() {
@@ -254,6 +299,14 @@ public class MainActivity extends Activity {
 
         StringBuilder sb = new StringBuilder();
         sb.append("Trạng thái: ").append(on ? "ĐANG BẬT" : "tắt").append('\n');
+        sb.append("Chu kỳ: ").append(Prefs.intervalMin(this)).append(" phút\n");
+        sb.append("Giờ yên tĩnh: ");
+        if (Prefs.quietEnabled(this)) {
+            sb.append(fmtMin(Prefs.quietStartMin(this))).append(" đến ")
+                    .append(fmtMin(Prefs.quietEndMin(this))).append('\n');
+        } else {
+            sb.append("tắt\n");
+        }
         sb.append("Heartbeat gần nhất: ").append(fmt(Prefs.lastHeartbeat(this))).append('\n');
         sb.append("Alarm kế tiếp: ").append(on ? fmt(Prefs.nextTrigger(this)) : "—").append('\n');
         sb.append("Google Play Services: ").append(Heartbeat.gmsVersion(this)).append('\n');
@@ -279,6 +332,10 @@ public class MainActivity extends Activity {
     private static String fmt(long t) {
         if (t <= 0) return "—";
         return new SimpleDateFormat("HH:mm:ss dd/MM", Locale.getDefault()).format(new Date(t));
+    }
+
+    private static String fmtMin(int minuteOfDay) {
+        return String.format(Locale.US, "%02d:%02d", minuteOfDay / 60, minuteOfDay % 60);
     }
 
     private int dp(int v) {

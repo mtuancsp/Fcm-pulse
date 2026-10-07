@@ -30,7 +30,8 @@ Hoặc mở thư mục này bằng Android Studio rồi chọn Build → Build A
 1. Mở app, bấm **Bỏ tối ưu hóa pin cho app này**.
 2. Trong cài đặt ứng dụng của ColorOS: Pin = Không hạn chế, bật Tự khởi động, khoá app trong
    màn hình đa nhiệm.
-3. Chọn chu kỳ (bắt đầu với 15 phút), tuỳ chọn giờ yên tĩnh ban đêm, bật công tắc.
+3. Nhập chu kỳ tuỳ ý từ 1 đến 1440 phút (bắt đầu với 15), tuỳ chọn giờ yên tĩnh ban đêm theo
+   từng 30 phút (ví dụ 23:30 đến 06:30), bấm Lưu và áp dụng, rồi bật công tắc.
 4. Bấm **Gửi heartbeat ngay**, mở nhật ký xem có dòng "đã gửi 2/2 broadcast".
 5. Xác nhận từ máy tính (một lần): `adb logcat | grep -i -E "gms|gcm|mcs"` rồi bấm gửi, xem
    Play Services có phản ứng không.

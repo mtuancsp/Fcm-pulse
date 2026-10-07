@@ -49,33 +49,34 @@ final class Scheduler {
     static long computeNext(Context c, long now) {
         long next = now + Prefs.intervalMin(c) * 60_000L;
         if (Prefs.quietEnabled(c)) {
-            next = pushOutOfQuiet(next, Prefs.quietStart(c), Prefs.quietEnd(c));
+            next = pushOutOfQuiet(next, Prefs.quietStartMin(c), Prefs.quietEndMin(c));
         }
         return next;
     }
 
     static boolean inQuiet(Context c, long t) {
         if (!Prefs.quietEnabled(c)) return false;
-        return isInWindow(t, Prefs.quietStart(c), Prefs.quietEnd(c));
+        return isInWindow(t, Prefs.quietStartMin(c), Prefs.quietEndMin(c));
     }
 
-    private static boolean isInWindow(long t, int startH, int endH) {
-        if (startH == endH) return false;
+    /** startMin và endMin là phút trong ngày; khung có thể vắt qua nửa đêm (ví dụ 23:30 đến 06:30). */
+    private static boolean isInWindow(long t, int startMin, int endMin) {
+        if (startMin == endMin) return false;
         Calendar cal = Calendar.getInstance();
         cal.setTimeInMillis(t);
-        int h = cal.get(Calendar.HOUR_OF_DAY);
-        return startH < endH ? (h >= startH && h < endH) : (h >= startH || h < endH);
+        int m = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE);
+        return startMin < endMin ? (m >= startMin && m < endMin) : (m >= startMin || m < endMin);
     }
 
-    /** Nếu thời điểm t rơi vào khung giờ yên tĩnh thì dời tới đầu giờ kết thúc. */
-    private static long pushOutOfQuiet(long t, int startH, int endH) {
-        if (!isInWindow(t, startH, endH)) return t;
+    /** Nếu thời điểm t rơi vào khung giờ yên tĩnh thì dời tới đúng giờ kết thúc. */
+    private static long pushOutOfQuiet(long t, int startMin, int endMin) {
+        if (!isInWindow(t, startMin, endMin)) return t;
         Calendar cal = Calendar.getInstance();
         cal.setTimeInMillis(t);
-        cal.set(Calendar.MINUTE, 0);
+        cal.set(Calendar.HOUR_OF_DAY, endMin / 60);
+        cal.set(Calendar.MINUTE, endMin % 60);
         cal.set(Calendar.SECOND, 0);
         cal.set(Calendar.MILLISECOND, 0);
-        cal.set(Calendar.HOUR_OF_DAY, endH);
         if (cal.getTimeInMillis() <= t) cal.add(Calendar.DAY_OF_MONTH, 1);
         return cal.getTimeInMillis();
     }

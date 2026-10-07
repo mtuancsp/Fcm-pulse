@@ -29,8 +29,9 @@ final class Prefs {
     /** 0 = setAndAllowWhileIdle (tiết kiệm), 1 = setAlarmClock (chính xác). */
     static int mode(Context c) { return sp(c).getInt("mode", 0); }
     static boolean quietEnabled(Context c) { return sp(c).getBoolean("quiet", false); }
-    static int quietStart(Context c) { return sp(c).getInt("qs", 23); }
-    static int quietEnd(Context c) { return sp(c).getInt("qe", 6); }
+    /** Giờ yên tĩnh tính bằng phút trong ngày (0..1439). */
+    static int quietStartMin(Context c) { return sp(c).getInt("qsm", 23 * 60); }
+    static int quietEndMin(Context c) { return sp(c).getInt("qem", 6 * 60); }
     static String actionsRaw(Context c) { return sp(c).getString("actions", DEFAULT_ACTIONS); }
     static long nextTrigger(Context c) { return sp(c).getLong("next", 0); }
     static long lastHeartbeat(Context c) { return sp(c).getLong("last", 0); }
@@ -45,14 +46,14 @@ final class Prefs {
     }
 
     static void saveConfig(Context c, boolean enabled, int interval, int mode,
-                           boolean quiet, int qs, int qe, String actions) {
+                           boolean quiet, int quietStartMin, int quietEndMin, String actions) {
         sp(c).edit()
                 .putBoolean("enabled", enabled)
                 .putInt("interval", interval)
                 .putInt("mode", mode)
                 .putBoolean("quiet", quiet)
-                .putInt("qs", qs)
-                .putInt("qe", qe)
+                .putInt("qsm", quietStartMin)
+                .putInt("qem", quietEndMin)
                 .putString("actions", actions)
                 .commit();
     }
